@@ -4,6 +4,7 @@ Data Extractor for normalizing and extracting transaction data from tables
 
 import logging
 import pandas as pd
+import re
 from typing import List, Dict, Any, Optional
 from utils import (
     map_column_to_standard,
@@ -21,6 +22,102 @@ class DataExtractor:
     """Extracts and normalizes transaction data from tables"""
     def __init__(self):
         pass
+
+    def extract_closing_balance(self, text_content: List[str], tables: List[List[List[str]]]) -> Optional[float]:
+        """
+        Extract closing balance from text content and tables
+        Returns the closing balance amount or None if not found
+        """
+        closing_balance = None
+        
+        # Method 1: Look for closing balance in text content
+        for text in text_content:
+            if not text:
+                continue
+                
+            # Common patterns for closing balance
+            patterns = [
+                r'closing\s+balance[:\s]*rs?\.?\s*([\d,]+\.?\d*)',
+                r'balance\s+as\s+on[^:]*[:\s]*rs?\.?\s*([\d,]+\.?\d*)',
+                r'closing\s+amount[:\s]*rs?\.?\s*([\d,]+\.?\d*)',
+                r'final\s+balance[:\s]*rs?\.?\s*([\d,]+\.?\d*)',
+                r'balance\s+at\s+end[:\s]*rs?\.?\s*([\d,]+\.?\d*)',
+                r'closing\s+bal[:\s]*rs?\.?\s*([\d,]+\.?\d*)',
+                r'bal\s+as\s+on[^:]*[:\s]*rs?\.?\s*([\d,]+\.?\d*)',
+                r'closing\s+balance\s*[:\s]*([\d,]+\.?\d*)',
+                r'balance\s+as\s+on\s*[:\s]*([\d,]+\.?\d*)',
+            ]
+            
+            for pattern in patterns:
+                matches = re.findall(pattern, text, re.IGNORECASE)
+                if matches:
+                    try:
+                        # Clean the amount string and convert to float
+                        amount_str = matches[0].replace(',', '')
+                        closing_balance = float(amount_str)
+                        logger.info(f"Found closing balance in text: {closing_balance}")
+                        return closing_balance
+                    except (ValueError, IndexError):
+                        continue
+        
+        # Method 2: Look for closing balance in tables (summary tables)
+        for table in tables:
+            if not table or len(table) < 2:
+                continue
+                
+            # Look for summary tables that contain closing balance
+            header = table[0]
+            header_text = ' '.join([str(cell).lower() for cell in header if cell])
+            
+            # Check if this looks like a summary table
+            summary_keywords = ['opening', 'closing', 'balance', 'summary', 'total']
+            if any(keyword in header_text for keyword in summary_keywords):
+                # Look for closing balance in the table
+                for row in table[1:]:
+                    if not row:
+                        continue
+                    
+                    row_text = ' '.join([str(cell).lower() for cell in row if cell])
+                    
+                    # Look for closing balance row
+                    if any(keyword in row_text for keyword in ['closing', 'balance as on', 'final']):
+                        # Extract amount from this row
+                        for cell in row:
+                            if cell:
+                                amount = parse_amount(cell)
+                                if amount is not None:
+                                    closing_balance = amount
+                                    logger.info(f"Found closing balance in table: {closing_balance}")
+                                    return closing_balance
+        
+        # Method 3: Look for balance in the last transaction row (if balance column exists)
+        for table in tables:
+            if not table or len(table) < 2:
+                continue
+                
+            header = table[0]
+            balance_col_idx = None
+            
+            # Find balance column
+            for idx, col in enumerate(header):
+                if col and 'balance' in str(col).lower():
+                    balance_col_idx = idx
+                    break
+            
+            if balance_col_idx is not None:
+                # Get the last non-empty balance value
+                for row in reversed(table[1:]):
+                    if row and len(row) > balance_col_idx and row[balance_col_idx]:
+                        balance = parse_amount(row[balance_col_idx])
+                        if balance is not None:
+                            closing_balance = balance
+                            logger.info(f"Found closing balance from last transaction: {closing_balance}")
+                            return closing_balance
+        
+        if closing_balance is None:
+            logger.warning("Could not find closing balance in the statement")
+        
+        return closing_balance
 
     def extract_transactions_from_table(self, table: List[List[str]]) -> List[Dict[str, Any]]:
         """Extract transactions from a table (list of rows)"""

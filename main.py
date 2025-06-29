@@ -15,12 +15,24 @@ def main():
     args = parser.parse_args()
 
     agent = BankStatementParser()
-    transactions = agent.parse_file(args.file)
+    result = agent.parse_file_with_balance(args.file)
+    
+    transactions = result['transactions']
+    closing_balance = result['closing_balance']
+    
     if not transactions:
         print("No transactions found or failed to parse the file.")
         return
-    output_path = agent.save_parsed_output(transactions, args.output)
-    print(f"Parsed {len(transactions)} transactions. Output saved to: {output_path}")
+    
+    print(f"Parsed {len(transactions)} transactions.")
+    
+    if closing_balance is not None:
+        print(f"Closing Balance: ₹{closing_balance:,.2f}")
+    else:
+        print("Closing balance not found in the statement.")
+    
+    output_path = agent.save_parsed_output(transactions, args.output, closing_balance)
+    print(f"Output saved to: {output_path}")
 
 if __name__ == '__main__':
     main() 
